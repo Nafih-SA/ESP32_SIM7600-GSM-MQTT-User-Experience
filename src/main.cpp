@@ -71,7 +71,7 @@ void print_wakeup_reason(){
     case 1  : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
     case 2  : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
     case 3  : Serial.println("Thankyou for the feedback :)");button_falg = 1; break;
-    case 4  : Serial.println("Uploading data to cloud"); break;
+    case 4  : Serial.print("\nUploading data to cloud "); break;
     case 5  : Serial.println("Wakeup caused by ULP program"); break;
     default : Serial.println("Wakeup was not caused by deep sleep"); break;
   }
@@ -87,7 +87,7 @@ void print_wakeup_reason(){
         }
       }
       else
-        Serial.println("No feedback received :(");
+        Serial.println(",if any\nNo feedback received :(");
       break;
     }
     case 4 : Serial.println("rating: 1.0");feedback[++fbCount] = 1; break; //GPIO_2 pressed (2^2 = 4)
@@ -115,7 +115,7 @@ void setup()
 	esp_deep_sleep_start();
 }
 
-/************ Loop ****************/
+/************ Loop that will never run ****************/
 void loop()
 {
 
