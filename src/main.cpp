@@ -4,22 +4,20 @@
 
 /********** Macros & Varaibles ******************/
 #define DEBUG 1
+#define uS_TO_S_FACTOR 1000000  //Conversion factor for micro seconds to seconds
+#define TIME_TO_SLEEP  60        //Time ESP32 will go to sleep (in seconds)
+#define BUTTON_PIN_BITMASK 0x8004
 #define HOST "api.asksensors.com"
-#define HOST2 "httpbin.org"
-#define interval 30000
 const char *apiKeyIn = "E3Rqsw9UksfyZfpcX4gbBJ7cTRurlweT";
+#define interval 30000
+RTC_DATA_ATTR int fbCount = 0;
+RTC_DATA_ATTR int feedback[30];
 bool stringComplete = false;
 String msg = "";
-unsigned long previousMillis = 0; 
+unsigned long previousMillis = 0;
+uint64_t pin;
+bool button_falg = 0;
 
-struct coord
-{
-  float Latitude = 0;
-  float Longitude = 0;
-  float speed = 0;
-  char *Hem;
-  char E_W;
-} data;
 
 /********* Function Definitions ****************/
 void AT_init()
@@ -45,15 +43,7 @@ void AT_init()
   delay(500);
 }
 
-void getCoord()
-{
-  Serial2.println("AT+CGPS=1");
-  delay(40);
-  Serial2.println("AT+CGPSINFO");
-  // delay(100);
-  // Serial2.println("AT+CGPS=0");
-  // delay(4000);
-}
+
 
 void serialEvent()
 {
@@ -72,58 +62,57 @@ void serialEvent()
   }
 }
 
-double mm2dd(double x)
-{
-  int intpart = (int)x;
-  double decpart = (x - intpart) * 5 / 3;
-  return (intpart + decpart);
+void print_wakeup_reason(){
+  esp_sleep_wakeup_cause_t wakeup_reason;
+  wakeup_reason = esp_sleep_get_wakeup_cause();
+  pin = esp_sleep_get_ext1_wakeup_status();
+  switch(wakeup_reason)
+  {
+    case 1  : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
+    case 2  : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
+    case 3  : Serial.println("Thankyou for the feedback :)");button_falg = 1; break;
+    case 4  : Serial.println("Uploading data to cloud"); break;
+    case 5  : Serial.println("Wakeup caused by ULP program"); break;
+    default : Serial.println("Wakeup was not caused by deep sleep"); break;
+  }
+  switch(pin)
+  {
+    case 0 : 
+    {
+      if(fbCount)
+      {
+        while(fbCount>0)
+        {
+          Serial.println(feedback[fbCount--]);
+        }
+      }
+      else
+        Serial.println("No feedback received :(");
+      break;
+    }
+    case 4 : Serial.println("rating: 1.0");feedback[++fbCount] = 1; break; //GPIO_2 pressed (2^2 = 4)
+    case 32768 : Serial.println("rating: 5.0"); feedback[++fbCount] = 5; break; //GPIO_15 pressed (2^15 = 32768)
+    default : Serial.println("Hmm... that's unusual"); break;
+  }
 }
 
-void setCoord(float lat, float lang)
-{
-#ifdef DEBUG
-  Serial.printf("\nSending Lat:%f & Long:%f to Web server\n", lat, lang);
-#endif
-  delay(50);
-  Serial2.print("AT+CHTTPACT=\"");
-  Serial2.print(HOST);
-  Serial2.print("\",80\r\n");
-  delay(2000);
-
-  String url = "GET http://api.asksensors.com/write/";
-  url += apiKeyIn;
-  url += "/?module1=";
-  url += String(lat,6);
-  url += ",+";
-  url += String(lang,6);
-  url += " HTTP/1.1\r\n";
-  Serial2.print(url);
-
-  delay(50);
-  Serial2.print("Host: ");
-  Serial2.print(HOST);
-  Serial2.write("\r\n");
-  
-  // delay(50);
-  // Serial2.print("User-Agent: MY WEB AGENT\r");
-  
-  // delay(50);
-  // Serial2.print("Content-Length: 0\r");
-
-  delay(50);
-  Serial2.print("\r\n");
-  delay(50);
-  Serial2.print("\r\n");
-  delay(50);
-  Serial2.println("\r\n");
-}
 
 /************ Setup ****************/
 void setup()
 {
   Serial2.begin(115200);
   Serial.begin(115200);
-  AT_init();
+  delay(500);  
+  print_wakeup_reason(); 
+  if(button_falg)
+    Serial.printf("Feedback no.%d\n",fbCount); button_falg = 0; 
+  // AT_init();
+  esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
+  esp_sleep_enable_ext1_wakeup(BUTTON_PIN_BITMASK, ESP_EXT1_WAKEUP_ANY_HIGH );
+	Serial.println("Good night");
+
+	//Go to sleep now
+	esp_deep_sleep_start();
 }
 
 /************ Loop ****************/
@@ -131,7 +120,6 @@ void loop()
 {
 
   serialEvent();
-  unsigned long currentMillis = millis();
 #ifdef DEBUG
   /*********To Send AT Commands through Serial monitor**********/
   if (Serial.available())
@@ -146,35 +134,19 @@ void loop()
     Serial.println(msg);
 #endif
 
-    if (msg.indexOf("CGPSINFO") > 0)
-    {
-      char buf[512];
-      msg.toCharArray(buf, msg.length());
-      char *token = strtok(buf, ":");
-      while (msg.indexOf(",,,,,,,,") > 0)
-      {
-        Serial2.println("AT+CGPSINFO");
-        delay(200);
-        serialEvent();
-      }
-      token = strtok(NULL, ":");
-      data.Latitude = atof(strtok(token, ",")) / 100;
-      data.Latitude = mm2dd(data.Latitude);
-      data.Hem = strtok(NULL, ",");
-      data.Longitude = atof(strtok(NULL, ",")) / 100;
-      data.Longitude = mm2dd(data.Longitude);
-#ifdef DEBUG
-      Serial.printf("\t\t%s \nLatitude: %10.6f \nLongitude: %11.6f", data.Hem, data.Latitude, data.Longitude);
-#endif
-      setCoord(data.Latitude, data.Longitude);
-    }
+//     if (msg.indexOf("CGPSINFO") > 0)
+//     {
+//       char buf[512];
+//       msg.toCharArray(buf, msg.length());
+//       char *token = strtok(buf, ":");
+//       token = strtok(NULL, ":");
+      
+// #ifdef DEBUG
+//       Serial.printf("Inside string complete");
+// #endif
+//     }
     msg = "";
     stringComplete = false;
   }  
 
-  else if (currentMillis - previousMillis >= interval)
-  {
-    previousMillis = currentMillis;
-    getCoord();
-  }
 }
