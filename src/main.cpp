@@ -7,8 +7,8 @@
 #define uS_TO_S_FACTOR 1000000  //Conversion factor for micro seconds to seconds
 #define TIME_TO_SLEEP  60        //Time ESP32 will go to sleep (in seconds)
 #define BUTTON_PIN_BITMASK 0x8004
-#define HOST "api.asksensors.com"
-const char *apiKeyIn = "E3Rqsw9UksfyZfpcX4gbBJ7cTRurlweT";
+#define usrname "nafih_sa"
+const char *apiKeyIn = "aio_bWlP66Yg8CgVrlmzy3gy6ZQil0Fl";
 #define interval 30000
 RTC_DATA_ATTR int fbCount = 0;
 RTC_DATA_ATTR int feedback[30];
@@ -71,7 +71,21 @@ void print_wakeup_reason(){
     case 1  : Serial.println("Wakeup caused by external signal using RTC_IO"); break;
     case 2  : Serial.println("Wakeup caused by external signal using RTC_CNTL"); break;
     case 3  : Serial.println("Thankyou for the feedback :)");button_falg = 1; break;
-    case 4  : Serial.print("\nUploading data to cloud "); break;
+    case 4  : 
+    {
+      if(fbCount)
+      {
+        AT_init();
+        Serial.println("Uploading data to cloud");
+        Serial2.println("AT+CMQTTSTART");
+        delay(2000);
+        Serial2.println("AT+CMQTTACCQ=0,\"nafih_sa\"");
+        delay(2000);
+        Serial2.println("AT+CMQTTCONNECT=0,\"tcp://io.adafruit.com:1883\",90,1,\"nafih_sa\",\"aio_bWlP66Yg8CgVrlmzy3gy6ZQil0Fl\"");
+        delay(2000);
+      }
+      break;
+    }
     case 5  : Serial.println("Wakeup caused by ULP program"); break;
     default : Serial.println("Wakeup was not caused by deep sleep"); break;
   }
@@ -80,14 +94,49 @@ void print_wakeup_reason(){
     case 0 : 
     {
       if(fbCount)
-      {
-        while(fbCount>0)
-        {
-          Serial.println(feedback[fbCount--]);
-        }
+      {   
+        // while(fbCount>0)
+        // {
+          Serial2.println("AT+CMQTTTOPIC=0,24");
+          delay(1000);
+          Serial2.print("nafih_sa/feeds/feedback\r\n");
+          delay(1000);
+          String payload = "AT+CMQTTPAYLOAD=0,";
+          payload += String(2*fbCount-1); // to account fo the commas separating individual feedback
+          Serial2.println(payload);
+          delay(1000);
+          int i = 1;
+          while(i <= fbCount)
+          {
+            Serial2.print(feedback[i]);
+            if (i < fbCount)
+              Serial2.print(",");
+            i++;
+          }
+          Serial2.print("\r\n");
+          // Serial.print("\r\n");
+          // char str[32];
+          // int i=0;
+          // int index = 0;
+          // for (i=1; i<5; i++)
+          //   index += sprintf(&str[index], "%d ,", feedback[i]);
+          // Serial.println(str);
+          // Serial2.println(str);
+          delay(1000);
+        // }
+             
+        Serial2.print("AT+CMQTTPUB=0,1,60\r\n");
+        delay(1000);
+        Serial2.print("AT+CMQTTDISC=0,60\r\n");
+        delay(1000);
+        Serial2.print("AT+CMQTTREL=0\r\n");
+        delay(1000);
+        Serial2.print("AT+CMQTTSTOP\r\n");
+        delay(1000);
+        fbCount = 0;
       }
       else
-        Serial.println(",if any\nNo feedback received :(");
+        Serial.println("No feedback received :(");
       break;
     }
     case 4 : Serial.println("rating: 1.0");feedback[++fbCount] = 1; break; //GPIO_2 pressed (2^2 = 4)
@@ -102,11 +151,10 @@ void setup()
 {
   Serial2.begin(115200);
   Serial.begin(115200);
-  delay(500);  
+  delay(500);
   print_wakeup_reason(); 
   if(button_falg)
     Serial.printf("Feedback no.%d\n",fbCount); button_falg = 0; 
-  // AT_init();
   esp_sleep_enable_timer_wakeup(TIME_TO_SLEEP * uS_TO_S_FACTOR);
   esp_sleep_enable_ext1_wakeup(BUTTON_PIN_BITMASK, ESP_EXT1_WAKEUP_ANY_HIGH );
 	Serial.println("Good night");
